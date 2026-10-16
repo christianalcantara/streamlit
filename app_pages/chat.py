@@ -24,7 +24,14 @@ SUGESTOES = {
     ":orange[:material/lightbulb:] Ideia de projeto": "Sugira uma ideia de projeto escolar usando Python.",
 }
 
-modelo = obter_modelo()
+MODELOS = {
+    "gemini-3.5-flash-lite": "Rápido e econômico (recomendado para começar)",
+    "gemini-3.1-flash-lite": "Custo baixo, boa qualidade",
+    "gemini-3.6-flash": "Equilibrado entre velocidade e capacidade",
+    "gemini-3.8-flash": "O Flash mais capaz",
+    "gemini-3-flash-preview": "Preview, pode mudar sem aviso",
+}
+
 
 # ---------------------------------------------------------------
 # Estado da conversa: session_state sobrevive às reexecuções
@@ -45,11 +52,12 @@ with st.sidebar:
             type="password",
             help="Gere gratuitamente em https://aistudio.google.com/apikey",
         )
-
-    personalidade = st.radio(
-        "Personalidade",
-        list(PERSONALIDADES)
+    modelo = st.sidebar.selectbox(
+        "Modelo",
+        options=list(MODELOS),
+        format_func=lambda m: f"{m} — {MODELOS[m]}",
     )
+    personalidade = st.radio("Personalidade", list(PERSONALIDADES))
     temperatura = st.slider(
         "Criatividade (temperature)",
         min_value=0.0,
@@ -89,11 +97,14 @@ pergunta = st.chat_input("Digite sua mensagem...", submit_mode="disable")
 
 if not st.session_state.mensagens:
     sugestoes = st.empty()
-    escolhida = sugestoes.pills("Experimente perguntar:", list(SUGESTOES), label_visibility="collapsed")
+    escolhida = sugestoes.pills(
+        "Experimente perguntar:", list(SUGESTOES), label_visibility="collapsed"
+    )
     if escolhida:
         pergunta = SUGESTOES[escolhida]
     if pergunta:
         sugestoes.empty()
+
 
 def com_spinner(gerador, texto="Pensando..."):
     """Mostra um spinner até o primeiro pedaço chegar e devolve o stream completo."""
@@ -108,8 +119,18 @@ def mostrar_erro(erro: errors.APIError):
             "Limite do plano gratuito atingido. Aguarde um minuto e tente de novo.",
             icon=":material/hourglass_empty:",
         )
+    elif erro.code == 503:
+        st.error(
+            "O modelo está com alta demanda no momento. Tente novamente em instantes "
+            "ou escolha outro modelo na barra lateral.",
+            icon=":material/cloud_off:",
+        )
     else:
-        st.error(f"Erro ao chamar a API ({erro.code}): {erro.message}", icon=":material/error:")
+        st.error(
+            f"Erro ao chamar a API ({erro.code}): {erro.message}",
+            icon=":material/error:",
+        )
+
 
 if pergunta:
     st.session_state.mensagens.append({"role": "user", "content": pergunta})
@@ -128,7 +149,9 @@ if pergunta:
                 )
             )
             resposta = st.write_stream(stream)
-            st.session_state.mensagens.append({"role": "assistant", "content": resposta})
+            st.session_state.mensagens.append(
+                {"role": "assistant", "content": resposta}
+            )
         except errors.APIError as erro:
             st.session_state.mensagens.pop()  # remove a pergunta sem resposta
             mostrar_erro(erro)
@@ -137,11 +160,38 @@ if st.session_state.mensagens and st.session_state.mensagens[-1]["role"] == "ass
     st.feedback(
         "thumbs",
         key=f"feedback_{len(st.session_state.mensagens)}",
-        on_change=lambda: st.toast("Obrigado pelo feedback!", icon=":material/favorite:"),
+        on_change=lambda: st.toast(
+            "Obrigado pelo feedback!", icon=":material/favorite:"
+        ),
     )
 
+import json
+
+
+@st.dialog("Mensagens em JSON", width="large")
+def mostrar_json():
+    mensagens = st.session_state.mensagens
+
+    if not mensagens:
+        st.info("Nenhuma mensagem ainda.")
+        return
+
+    st.json(mensagens, expanded=True)
+
+    with st.expander("Texto bruto (para copiar)"):
+        st.code(
+            json.dumps(mensagens, ensure_ascii=False, indent=2),
+            language="json",
+        )
+
+
 with acoes:
-    if st.button("Limpar", icon=":material/delete:", disabled=not st.session_state.mensagens):
+    if st.button(
+        "Limpar",
+        icon=":material/delete:",
+        disabled=not st.session_state.mensagens,
+        width="stretch",
+    ):
         st.session_state.mensagens = []
         st.rerun()
     st.download_button(
@@ -152,4 +202,12 @@ with acoes:
         icon=":material/download:",
         disabled=not st.session_state.mensagens,
         on_click="ignore",
+        width="stretch",
     )
+    if st.sidebar.button(
+        "Ver JSON",
+        icon=":material/data_object:",
+        disabled=not st.session_state.mensagens,
+        width="stretch",
+    ):
+        mostrar_json()
