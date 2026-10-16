@@ -1,0 +1,8 @@
+[theme]
+primaryColor = "#FF4B4B"
+borderColor = "#E6E6EA"
+showWidgetBorder = true
+baseRadius = "medium"
+
+[server]
+maxUploadSize = 10
