@@ -1,3 +1,9 @@
+[ui]
+hideTopBar = true
+
+[client]
+toolbarMode = "viewer"
+
 [theme]
 primaryColor = "#FF4B4B"
 borderColor = "#E6E6EA"

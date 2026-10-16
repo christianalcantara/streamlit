@@ -1,4 +1,5 @@
 import json
+from itertools import chain
 
 import streamlit as st
 from google.genai import errors
@@ -45,8 +46,9 @@ with st.sidebar:
             help="Gere gratuitamente em https://aistudio.google.com/apikey",
         )
 
-    personalidade = st.segmented_control(
-        "Personalidade", list(PERSONALIDADES), default="Prestativo", required=True
+    personalidade = st.radio(
+        "Personalidade",
+        list(PERSONALIDADES)
     )
     temperatura = st.slider(
         "Criatividade (temperature)",
@@ -93,6 +95,22 @@ if not st.session_state.mensagens:
     if pergunta:
         sugestoes.empty()
 
+def com_spinner(gerador, texto="Pensando..."):
+    """Mostra um spinner até o primeiro pedaço chegar e devolve o stream completo."""
+    with st.spinner(texto):
+        primeiro = next(gerador, "")  # bloqueia até a API começar a responder
+    return chain([primeiro], gerador)
+
+
+def mostrar_erro(erro: errors.APIError):
+    if erro.code == 429:
+        st.error(
+            "Limite do plano gratuito atingido. Aguarde um minuto e tente de novo.",
+            icon=":material/hourglass_empty:",
+        )
+    else:
+        st.error(f"Erro ao chamar a API ({erro.code}): {erro.message}", icon=":material/error:")
+
 if pergunta:
     st.session_state.mensagens.append({"role": "user", "content": pergunta})
     with st.chat_message("user"):
@@ -100,7 +118,7 @@ if pergunta:
 
     with st.chat_message("assistant"):
         try:
-            resposta = st.write_stream(
+            stream = com_spinner(
                 gerar_resposta(
                     cliente,
                     modelo,
@@ -109,16 +127,11 @@ if pergunta:
                     temperatura,
                 )
             )
+            resposta = st.write_stream(stream)
             st.session_state.mensagens.append({"role": "assistant", "content": resposta})
         except errors.APIError as erro:
             st.session_state.mensagens.pop()  # remove a pergunta sem resposta
-            if erro.code == 429:
-                st.error(
-                    "Limite do plano gratuito atingido. Aguarde um minuto e tente de novo.",
-                    icon=":material/hourglass_empty:",
-                )
-            else:
-                st.error(f"Erro ao chamar a API ({erro.code}): {erro.message}", icon=":material/error:")
+            mostrar_erro(erro)
 
 if st.session_state.mensagens and st.session_state.mensagens[-1]["role"] == "assistant":
     st.feedback(

@@ -24,7 +24,6 @@ def obter_modelo() -> str:
 
 
 def obter_chave_api() -> str | None:
-    print(_ler_secret("GEMINI_API_KEY"))
     return _ler_secret("GEMINI_API_KEY") or _ler_secret("GOOGLE_API_KEY")
 
 
