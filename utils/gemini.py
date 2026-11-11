@@ -1,65 +1,57 @@
-"""Funções de acesso à API do Google Gemini."""
+"""Módulo de integração: traduz nosso histórico e recebe texto da API Gemini."""
 
-import os
 from collections.abc import Iterator
 
-import streamlit as st
 from google import genai
 from google.genai import types
 
+# Constantes guardam configurações que não variam durante uma resposta.
 MODELO_PADRAO = "gemini-3.5-flash-lite"
-
-
-def _ler_secret(nome: str) -> str | None:
-    """Lê de st.secrets (Streamlit Cloud) e, se não existir, da variável de ambiente."""
-    try:
-        valor = st.secrets.get(nome)
-    except FileNotFoundError:
-        valor = None
-    return valor or os.getenv(nome)
-
-
-def obter_modelo() -> str:
-    return _ler_secret("GEMINI_MODEL") or MODELO_PADRAO
-
-
-def obter_chave_api() -> str | None:
-    return _ler_secret("GEMINI_API_KEY") or _ler_secret("GOOGLE_API_KEY")
-
-
-@st.cache_resource(max_entries=10)
-def obter_cliente(chave: str) -> genai.Client:
-    """Cria o cliente uma única vez por chave (não a cada reexecução do script)."""
-    return genai.Client(api_key=chave)
+INSTRUCAO = (
+    "Você é um assistente de estudos de um curso técnico. "
+    "Responda em português do Brasil, com explicações curtas, exemplos e unidades. "
+    "Ajude o aluno a entender Python e conceitos de eletricidade passo a passo. "
+    "Se não souber, diga que não sabe. Use exemplos teóricos de eletricidade."
+)
 
 
 def para_formato_gemini(mensagens: list[dict]) -> list[types.Content]:
-    """Converte o histórico do chat. No Gemini o papel da IA se chama "model"."""
-    return [
-        types.Content(
-            role="model" if m["role"] == "assistant" else "user",
-            parts=[types.Part(text=m["content"])],
+    """O Streamlit usa 'assistant'; a API Gemini usa 'model' para a IA."""
+    conteudos = []
+    for mensagem in mensagens:
+        papel = "model" if mensagem["role"] == "assistant" else "user"
+        conteudo = types.Content(
+            role=papel,
+            parts=[types.Part(text=mensagem["content"])],
         )
-        for m in mensagens
-    ]
+        conteudos.append(conteudo)
+    return conteudos
 
 
-def gerar_resposta(
-    cliente: genai.Client,
-    modelo: str,
-    mensagens: list[dict],
-    instrucao: str,
-    temperatura: float,
-) -> Iterator[str]:
-    """Gerador que entrega a resposta pedaço por pedaço (streaming)."""
-    stream = cliente.models.generate_content_stream(
-        model=modelo,
-        contents=para_formato_gemini(mensagens),
-        config=types.GenerateContentConfig(
-            system_instruction=instrucao,
-            temperature=temperatura,
-        ),
-    )
-    for pedaco in stream:
-        if pedaco.text:  # alguns pedaços podem vir vazios
-            yield pedaco.text
+def gerar_resposta(chave: str, modelo: str, mensagens: list[dict]) -> Iterator[str]:
+    """Entrega cada trecho assim que chega; propaga falhas para a interface tratar.
+
+    Iterator[str] indica uma sequência de textos produzida aos poucos.
+    O yield faz desta função um gerador, explicado no guia passo a passo.
+    """
+    recebeu_texto = False
+    # O cliente abre uma conexão HTTP. 'with' fecha os recursos ao terminar,
+    # inclusive quando acontece um erro. O timeout está em milissegundos.
+    with genai.Client(api_key=chave, http_options=types.HttpOptions(timeout=30000)) as cliente:
+        fluxo = cliente.models.generate_content_stream(
+            model=modelo,
+            contents=para_formato_gemini(mensagens),
+            config=types.GenerateContentConfig(
+                system_instruction=INSTRUCAO,
+                max_output_tokens=1024,
+            ),
+        )
+        for trecho in fluxo:
+            if trecho.text:  # Nem todo evento da API contém texto.
+                if trecho.text.strip():
+                    recebeu_texto = True
+                yield trecho.text
+
+    if not recebeu_texto:
+        # Pode ocorrer por bloqueio de conteúdo ou uma resposta sem texto.
+        raise ValueError("A API não retornou texto.")
